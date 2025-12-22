@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Step 2: Edit Your Scripts</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        body { background-color: #f8f9fa; }
+        .container { max-width: 960px; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; }
+        .scene-container { border: 1px solid #dee2e6; border-radius: .375rem; padding: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="container my-5">
+        <div class="text-center mb-4">
+            <h1>Step 2: Write & Edit Scripts</h1>
+            <p class="lead">Review your generated scripts or write them from scratch. Each scene has a script and a visual description.</p>
+        </div>
+        
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                {% for message in messages %}
+                <div class="alert alert-danger" role="alert"> {{ message }} </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="post" id="scripts-form">
+            <div id="videos-wrapper">
+                {% for video_key, scenes in scripts.items() %}
+                <div class="card mb-3" id="{{ video_key }}">
+                    <div class="card-header">
+                        <h5 class="mb-0">{{ video_key.replace('_', ' ').title() }}</h5>
+                        <button type="button" class="btn btn-danger btn-sm" onclick="deleteVideo('{{ video_key }}')"><i class="bi bi-trash"></i> Delete Video</button>
+                    </div>
+                    <div class="card-body scenes-wrapper">
+                        {% for scene in scenes %}
+                        <div class="scene-container mb-3">
+                            <div class="d-flex justify-content-end mb-2">
+                                <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteScene(this)"><i class="bi bi-x-lg"></i> Delete Scene</button>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label small">What Speaker Says:</label>
+                                <textarea name="{{ video_key }}_script" class="form-control" rows="3">{{ scene.script }}</textarea>
+                            </div>
+                            <div>
+                                <label class="form-label small">Visuals:</label>
+                                <textarea name="{{ video_key }}_visuals" class="form-control" rows="2">{{ scene.visuals }}</textarea>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="card-footer">
+                        <button type="button" class="btn btn-primary btn-sm" onclick="addScene('{{ video_key }}')"><i class="bi bi-plus-circle"></i> Add Scene</button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <hr class="my-4">
+
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <a href="{{ url_for('step1') }}" class="btn btn-outline-secondary btn-lg"><i class="bi bi-arrow-left-circle"></i> Go Back</a>
+                    <button type="button" class="btn btn-secondary btn-lg ms-2" onclick="addVideo()"><i class="bi bi-plus-lg"></i> Add Video</button>
+                </div>
+                <button type="submit" class="btn btn-success btn-lg">Proceed to Final Step <i class="bi bi-arrow-right-circle"></i></button>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        let videoCounter = "{{ scripts|length + 1 }}";
+        videoCounter = parseInt(videoCounter);
+
+        function addScene(videoKey) {
+            const scenesWrapper = document.querySelector(`#${videoKey} .scenes-wrapper`);
+            const newScene = document.createElement('div');
+            newScene.classList.add('scene-container', 'mb-3');
+            newScene.innerHTML = `
+                <div class="d-flex justify-content-end mb-2">
+                    <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteScene(this)"><i class="bi bi-x-lg"></i> Delete Scene</button>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small">What Speaker Says:</label>
+                    <textarea name="${videoKey}_script" class="form-control" rows="3"></textarea>
+                </div>
+                <div>
+                    <label class="form-label small">Visuals:</label>
+                    <textarea name="${videoKey}_visuals" class="form-control" rows="2"></textarea>
+                </div>
+            `;
+            scenesWrapper.appendChild(newScene);
+        }
+
+        function deleteScene(button) {
+            const sceneContainer = button.closest('.scene-container');
+            const scenesWrapper = sceneContainer.parentElement;
+            if (scenesWrapper.children.length > 1) {
+                sceneContainer.remove();
+            } else {
+                alert("Each video must have at least one scene.");
+            }
+        }
+
+        function addVideo() {
+            const videosWrapper = document.getElementById('videos-wrapper');
+            const videoKey = `video_${videoCounter}`;
+            const newVideo = document.createElement('div');
+            newVideo.classList.add('card', 'mb-3');
+            newVideo.id = videoKey;
+            newVideo.innerHTML = `
+                <div class="card-header">
+                    <h5 class="mb-0">Video ${videoCounter}</h5>
+                    <button type="button" class="btn btn-danger btn-sm" onclick="deleteVideo('${videoKey}')"><i class="bi bi-trash"></i> Delete Video</button>
+                </div>
+                <div class="card-body scenes-wrapper">
+                    <!-- Add the first blank scene -->
+                    <div class="scene-container mb-3">
+                         <div class="d-flex justify-content-end mb-2">
+                            <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteScene(this)"><i class="bi bi-x-lg"></i> Delete Scene</button>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small">What Speaker Says:</label>
+                            <textarea name="${videoKey}_script" class="form-control" rows="3"></textarea>
+                        </div>
+                        <div>
+                            <label class="form-label small">Visuals:</label>
+                            <textarea name="${videoKey}_visuals" class="form-control" rows="2"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <button type="button" class="btn btn-primary btn-sm" onclick="addScene('${videoKey}')"><i class="bi bi-plus-circle"></i> Add Scene</button>
+                </div>
+            `;
+            videosWrapper.appendChild(newVideo);
+            videoCounter++;
+        }
+
+        function deleteVideo(videoKey) {
+            if (document.querySelectorAll('.card.mb-3').length > 1) {
+                 const videoContainer = document.getElementById(videoKey);
+                 videoContainer.remove();
+            } else {
+                alert("You must have at least one video.");
+            }
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
