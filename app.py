@@ -206,6 +206,9 @@ def step1():
 def step2():
     if 'scripts' not in session: return redirect(url_for('step1'))
 
+    # 1. Grab existing data to use as fallback
+    previous_scripts = session.get('scripts', {})
+
     if request.method == 'POST':
         scripts_data = {}
         video_keys = sorted(list(set(k.split('_script')[0] for k in request.form if '_script' in k)))
@@ -216,6 +219,9 @@ def step2():
             media_types = request.form.getlist(f'{key}_media_type')
             media_urls = request.form.getlist(f'{key}_media_url')
             
+            # Get the list of previous scenes for this specific video (if any)
+            previous_video_scenes = previous_scripts.get(key, [])
+
             video_scenes = []
             for index, script_text in enumerate(scripts):
                 if script_text.strip():
@@ -225,19 +231,25 @@ def step2():
                     if media_type == 'url':
                         final_source = media_urls[index]
                     elif media_type == 'file':
+                        # Check for NEW file upload
                         file_input_name = f"{key}_file_{index}"
-                        if file_input_name in request.files:
-                            file = request.files[file_input_name]
-                            if file and file.filename != '':
-                                filename = secure_filename(f"{key}_scene_{index}_{file.filename}")
-                                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                                file.save(file_path)
-                                final_source = file_path
-                            else:
-                                # Logic to keep existing file if not re-uploaded would go here
-                                # For now, relies on re-upload if logic flow was broken
-                                pass
-                    
+                        file = request.files.get(file_input_name)
+                        
+                        if file and file.filename != '':
+                            # CASE A: User uploaded a new file -> Save it
+                            filename = secure_filename(f"{key}_scene_{index}_{file.filename}")
+                            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                            file.save(file_path)
+                            final_source = file_path
+                        else:
+                            # CASE B: No new file -> Try to keep the OLD file path
+                            # We check if this scene index existed in the previous session
+                            if index < len(previous_video_scenes):
+                                old_scene = previous_video_scenes[index]
+                                # Only keep it if the previous type was also 'file'
+                                if old_scene.get('media_type') == 'file':
+                                    final_source = old_scene.get('media_source', '')
+
                     video_scenes.append({
                         "scene": str(index + 1),
                         "script": script_text.strip(),
@@ -254,7 +266,10 @@ def step2():
             return redirect(url_for('step2'))
 
         session['scripts'] = scripts_data
+        
+        # Clear previous video results because the script has changed
         session.pop('generated_videos', None) 
+        
         return redirect(url_for('step3'))
 
     return render_template('step2.html', scripts=session.get('scripts', {}))
@@ -263,18 +278,32 @@ def step2():
 def step3():
     if 'scripts' not in session: return redirect(url_for('step2'))
 
+    # Load previously saved settings (if any)
+    saved_settings = session.get('step3_settings', {})
+
+    # If we already generated videos in this session, show results
     if request.method == 'GET' and 'generated_videos' in session:
         return render_template('step3.html', 
                              scripts=session.get('scripts', {}), 
-                             generated_videos=session['generated_videos'])
+                             generated_videos=session['generated_videos'],
+                             settings=saved_settings) # Pass settings
 
     if request.method == 'POST':
         voice_option = request.form.get('voiceover')
-
+        
+        # Capture custom Ref ID, default to Kiova if empty
         custom_ref_id = request.form.get('fish_ref_id')
         if not custom_ref_id or not custom_ref_id.strip():
             custom_ref_id = "b85455e9d73e492d95c554176a8913df"
-        
+
+        # --- FIX: Save these settings to session ---
+        session['step3_settings'] = {
+            'voiceover': voice_option,
+            'fish_ref_id': custom_ref_id
+        }
+        saved_settings = session['step3_settings']
+        # -------------------------------------------
+
         # 1. Project Setup
         current_project_name = get_next_project_name()
         current_project_path = os.path.join(PROJECTS_FOLDER, current_project_name)
@@ -298,16 +327,13 @@ def step3():
             vid_id = vid_key.split('_')[1] 
             
             # --- A. Handle Specific Music Upload ---
-            # Look for input name="bg_music_video_1", "bg_music_video_2" etc.
             music_file_input_name = f"bg_music_{vid_key}"
             music_file = request.files.get(music_file_input_name)
             
             specific_music_path = None
             if music_file and music_file.filename != '':
-                # Save to project folder/data/bg_music/video_1_song.mp3
                 music_folder = os.path.join(current_project_path, 'data', 'bg_music')
                 os.makedirs(music_folder, exist_ok=True)
-                
                 safe_name = secure_filename(f"{vid_key}_{music_file.filename}")
                 specific_music_path = os.path.join(music_folder, safe_name)
                 music_file.save(specific_music_path)
@@ -338,6 +364,7 @@ def step3():
                          tts = gTTS(text=scene['script'], lang='en', slow=False)
                          tts.save(vo_path)
                 elif voice_option == 'FishAudio':
+                    # USE SAVED ID
                     if not generate_fish_audio(scene['script'], vo_path, ref_id=custom_ref_id):
                          from gtts import gTTS
                          tts = gTTS(text=scene['script'], lang='en', slow=False)
@@ -364,25 +391,17 @@ def step3():
 
             # --- C. Generate Video & Apply Music ---
             try:
-                # 1. Generate base video
                 raw_video_path = vg.execute(video_dict, media_paths_list)
-                
                 final_output_path = raw_video_path
 
-                # 2. Apply Specific Music (if uploaded)
                 if specific_music_path and os.path.exists(raw_video_path):
-                    print(f"Applying music to {vid_key}...")
-                    # The updated generator will use specific_audio_path if provided
                     music_video_path = bg_gen.execute(raw_video_path, specific_audio_path=specific_music_path)
                     if music_video_path:
                         final_output_path = music_video_path
 
-                # 3. Upload to Azure
                 if final_output_path and os.path.exists(final_output_path):
                     filename = os.path.basename(final_output_path)
                     blob_name = f"{current_project_name}/{vid_key}_{filename}"
-                    print(f"Uploading {blob_name}...")
-                    
                     cloud_url = upload_to_azure(final_output_path, blob_name)
                     azure_links.append(cloud_url if cloud_url else f"Upload Failed: {final_output_path}")
 
@@ -393,12 +412,17 @@ def step3():
         session['generated_videos'] = azure_links
         flash(f"Generation Complete! Created {len(azure_links)} videos.", "success")
 
+        # Pass settings back to template
         return render_template('step3.html', 
                              scripts=session.get('scripts', {}), 
-                             generated_videos=azure_links)
+                             generated_videos=azure_links,
+                             settings=saved_settings)
 
-    return render_template('step3.html', scripts=session.get('scripts', {}))
-
+    # GET Request (First load)
+    return render_template('step3.html', 
+                         scripts=session.get('scripts', {}), 
+                         settings=saved_settings)
+    
 if __name__ == '__main__':
     # Ensure fonts folder exists for VideoGenerator (TextClip)
     if not os.path.exists('fonts'):

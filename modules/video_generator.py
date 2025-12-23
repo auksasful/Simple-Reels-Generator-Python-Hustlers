@@ -126,6 +126,11 @@ class VideoGenerator:
                 # 2. Create Visual Background
                 if media_path and media_path.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
                     image = Image.open(media_path)
+                    
+                    # Force RGB (Drop Alpha/Transparency)
+                    if image.mode != 'RGB':
+                        image = image.convert('RGB')
+
                     image = self.scale_and_crop(image)
                     video_clip = self.zoom_in_effect(image, duration=audio_duration)
                 elif media_path:
@@ -200,7 +205,15 @@ class VideoGenerator:
                 video_clip = original_clip.subclip(0, audio_duration)
             return video_clip
         else:
-            image_clip = ImageClip(media_path, duration=audio_duration)
+           # Load with PIL first to convert to RGB safely
+            img = Image.open(media_path)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            # Convert PIL image to NumPy array for MoviePy
+            img_np = np.array(img)
+            
+            image_clip = ImageClip(img_np, duration=audio_duration)
             image_clip = image_clip.resize(newsize=(self.width, self.height))
             return image_clip
         

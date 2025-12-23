@@ -80,10 +80,10 @@
                 <div class="mb-3">
                     <label for="voiceover" class="form-label">Select Voice Engine</label>
                     <select class="form-select" id="voiceover" name="voiceover" onchange="toggleFishInput()">
-                        <option value="GoogleTTS">Google TTS (Journey/Energetic)</option>
-                        <option value="FishAudio">Fish Audio (High Quality Clone)</option>
-                        <option value="pyttsx3">Offline Fallback</option>
-                        <option value="Pollinations">Pollinations AI</option>
+                        <option value="GoogleTTS" {% if settings.get('voiceover') == 'GoogleTTS' %}selected{% endif %}>Google TTS (Journey/Energetic)</option>
+                        <option value="FishAudio" {% if settings.get('voiceover') == 'FishAudio' %}selected{% endif %}>Fish Audio (High Quality Clone)</option>
+                        <option value="pyttsx3" {% if settings.get('voiceover') == 'pyttsx3' %}selected{% endif %}>Offline Fallback</option>
+                        <option value="Pollinations" {% if settings.get('voiceover') == 'Pollinations' %}selected{% endif %}>Pollinations AI</option>
                     </select>
                 </div>
 
@@ -91,7 +91,8 @@
                 <div id="fish-settings" class="d-none border-start border-4 border-info ps-3 bg-light p-2 rounded">
                     <label for="fish_ref_id" class="form-label fw-bold small text-info">Fish Audio Reference ID (Voice ID)</label>
                     <input type="text" class="form-control font-monospace" id="fish_ref_id" name="fish_ref_id" 
-                           value="b85455e9d73e492d95c554176a8913df" placeholder="Enter Ref ID...">
+                           value="{{ settings.get('fish_ref_id', 'b85455e9d73e492d95c554176a8913df') }}" 
+                           placeholder="Enter Ref ID...">
                     <div class="form-text small">Default: British Kiova Voice. Change this to clone a different voice.</div>
                 </div>
             </div>
