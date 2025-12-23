@@ -3,7 +3,7 @@ import random
 import time
 import os
 from datetime import datetime
-import pollinations
+# import pollinations
 import urllib.parse
 import requests
 from openai import OpenAI

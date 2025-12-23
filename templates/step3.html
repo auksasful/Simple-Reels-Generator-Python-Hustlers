@@ -15,21 +15,21 @@
 <body>
     <div class="container my-5">
         <div class="text-center mb-4">
-            <h1>Step 3: Generate</h1>
-            <p class="lead">Review your manual inputs and select a voice.</p>
+            <h1>Step 3: Finalize</h1>
+            <p class="lead">Select audio options and generate your reels.</p>
         </div>
 
-        {% with messages = get_flashed_messages() %}
+        {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-                {% for message in messages %}
-                <div class="alert alert-info" role="alert"> {{ message }} </div>
+                {% for category, message in messages %}
+                <div class="alert alert-{{ category if category != 'message' else 'info' }}" role="alert"> {{ message }} </div>
                 {% endfor %}
             {% endif %}
         {% endwith %}
         
         <div class="card my-4">
             <div class="card-header">
-                <h3><i class="bi bi-card-text"></i> Review Data</h3>
+                <h3><i class="bi bi-card-text"></i> Review Scenes</h3>
             </div>
             <div class="card-body">
                 {% for video_key, scenes in scripts.items() %}
@@ -38,11 +38,11 @@
                     <div class="scene-review">
                         <p class="mb-1"><strong>Script:</strong> {{ scene.script }}</p>
                         <p class="mb-0 text-muted">
-                            <small><strong>Media ({{ scene.media_type }}):</strong> 
+                            <small><strong>Media:</strong> 
                             {% if scene.media_type == 'file' %}
-                                {{ scene.media_source.split('/')[-1] }} <!-- Show filename only -->
+                                {{ scene.media_source.split('/')[-1] }}
                             {% else %}
-                                <a href="{{ scene.media_source }}" target="_blank">{{ scene.media_source }}</a>
+                                <a href="{{ scene.media_source }}" target="_blank">Link</a>
                             {% endif %}
                             </small>
                         </p>
@@ -54,17 +54,26 @@
         </div>
 
         <div class="card p-4">
-            <form method="post">
-                <div class="mb-3">
-                    <label for="voiceover" class="form-label"><h5><i class="bi bi-mic"></i> Voiceover</h5></label>
-                    <select class="form-select" id="voiceover" name="voiceover">
-                        <option value="pytts3x">pytts3x (Offline)</option>
-                        <option value="Pollinations">Pollinations (Cloud)</option>
-                    </select>
+            <form method="post" enctype="multipart/form-data">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="voiceover" class="form-label"><h5><i class="bi bi-mic"></i> Voiceover</h5></label>
+                        <select class="form-select" id="voiceover" name="voiceover">
+                            <option value="pyttsx3">Offline (pyttsx3)</option>
+                            <option value="FishAudio">Fish Audio (British Kiova - High Quality)</option>
+                            <option value="GoogleTTS" selected>Google TTS (Female - Free Tier)</option>
+                            <option value="Pollinations">AI Cloud (Pollinations)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label for="bg_music" class="form-label"><h5><i class="bi bi-music-note-beamed"></i> Background Music (Optional)</h5></label>
+                        <input type="file" class="form-control" id="bg_music" name="bg_music" accept="audio/*">
+                        <div class="form-text">If left empty, no music will be added.</div>
+                    </div>
                 </div>
                 <hr class="my-4">
                 <div class="d-flex justify-content-between align-items-center">
-                    <a href="{{ url_for('step2') }}" class="btn btn-outline-secondary btn-lg"><i class="bi bi-arrow-left-circle"></i> Back to Edit</a>
+                    <a href="{{ url_for('step2') }}" class="btn btn-outline-secondary btn-lg"><i class="bi bi-arrow-left-circle"></i> Back</a>
                     <button type="submit" class="btn btn-success btn-lg"><i class="bi bi-magic"></i> Generate Videos</button>
                 </div>
             </form>

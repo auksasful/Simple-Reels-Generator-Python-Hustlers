@@ -1,1 +1,6 @@
 .env
+
+# Ignore everything inside any media folder under projects/
+projects/*
+static/*
+data/bg_music/*

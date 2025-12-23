@@ -28,13 +28,12 @@
             {% endif %}
         {% endwith %}
 
-        <!-- Added enctype for file uploads -->
         <form method="post" id="scripts-form" enctype="multipart/form-data">
             <div id="videos-wrapper">
                 {% for video_key, scenes in scripts.items() %}
                 <div class="card mb-3" id="{{ video_key }}">
                     <div class="card-header">
-                        <h5 class="mb-0">{{ video_key.replace('_', ' ').title() }}</h5>
+                        <h5 class="mb-0 video-title">{{ video_key.replace('_', ' ').title() }}</h5>
                         <button type="button" class="btn btn-danger btn-sm" onclick="deleteVideo('{{ video_key }}')"><i class="bi bi-trash"></i> Delete Video</button>
                     </div>
                     <div class="card-body scenes-wrapper">
@@ -54,24 +53,27 @@
                             <div class="mb-2">
                                 <label class="form-label fw-bold small">Footage Source:</label>
                                 <div class="form-check form-check-inline">
-                                    <input class="form-check-input" type="radio" name="{{ video_key }}_media_type" value="url" checked onchange="toggleMediaInput(this)">
+                                    <input class="form-check-input" type="radio" name="{{ video_key }}_media_type_select_{{ loop.index0 }}_{{ video_key }}" value="url" {% if scene.media_type == 'url' %}checked{% endif %} onchange="toggleMediaInput(this)">
                                     <label class="form-check-label">Image/Video URL</label>
                                 </div>
                                 <div class="form-check form-check-inline">
-                                    <input class="form-check-input" type="radio" name="{{ video_key }}_media_type" value="file" onchange="toggleMediaInput(this)">
+                                    <input class="form-check-input" type="radio" name="{{ video_key }}_media_type_select_{{ loop.index0 }}_{{ video_key }}" value="file" {% if scene.media_type == 'file' %}checked{% endif %} onchange="toggleMediaInput(this)">
                                     <label class="form-check-label">Upload File</label>
                                 </div>
+                                <input type="hidden" name="{{ video_key }}_media_type" value="{{ scene.media_type }}" class="media-type-hidden">
                             </div>
 
                             <!-- URL Input -->
-                            <div class="media-input-url mb-2">
-                                <input type="text" name="{{ video_key }}_media_url" class="form-control" placeholder="https://example.com/video.mp4">
+                            <div class="media-input-url mb-2 {% if scene.media_type == 'file' %}d-none{% endif %}">
+                                <input type="text" name="{{ video_key }}_media_url" class="form-control" placeholder="https://example.com/video.mp4" value="{{ scene.media_source if scene.media_type == 'url' else '' }}">
                             </div>
 
-                            <!-- File Input (Hidden by default based on radio) -->
-                            <div class="media-input-file mb-2 d-none">
-                                <!-- Note: Name must be generated dynamically in JS, but for existing loop: -->
+                            <!-- File Input -->
+                            <div class="media-input-file mb-2 {% if scene.media_type == 'url' %}d-none{% endif %}">
                                 <input type="file" name="{{ video_key }}_file_{{ loop.index0 }}" class="form-control" accept="image/*,video/*">
+                                {% if scene.media_type == 'file' %}
+                                    <small class="text-success">Current: {{ scene.media_source.split('/')[-1] }}</small>
+                                {% endif %}
                             </div>
                         </div>
                         {% endfor %}
@@ -93,12 +95,22 @@
     </div>
 
     <script>
-        let videoCounter = document.querySelectorAll('.card.mb-3').length + 1;
+        // Init radio listeners for existing items
+        document.addEventListener('DOMContentLoaded', () => {
+            document.querySelectorAll('.scene-container').forEach(container => {
+                const hidden = container.querySelector('.media-type-hidden');
+                container.querySelectorAll('input[type="radio"]').forEach(r => {
+                    r.addEventListener('change', (e) => { hidden.value = e.target.value; });
+                });
+            });
+        });
 
         function toggleMediaInput(radio) {
             const container = radio.closest('.scene-container');
             const urlDiv = container.querySelector('.media-input-url');
             const fileDiv = container.querySelector('.media-input-file');
+            // Update hidden input
+            container.querySelector('.media-type-hidden').value = radio.value;
 
             if (radio.value === 'url') {
                 urlDiv.classList.remove('d-none');
@@ -109,18 +121,19 @@
             }
         }
 
-        // Renumber file inputs within a video card to ensure backend can find them
         function reindexFileInputs(videoKey) {
             const wrapper = document.querySelector(`#${videoKey} .scenes-wrapper`);
-            const fileInputs = wrapper.querySelectorAll('input[type="file"]');
-            fileInputs.forEach((input, index) => {
+            const fileDivs = wrapper.querySelectorAll('.media-input-file');
+            fileDivs.forEach((div, index) => {
+                const input = div.querySelector('input[type="file"]');
                 input.name = `${videoKey}_file_${index}`;
             });
         }
 
         function addScene(videoKey) {
             const scenesWrapper = document.querySelector(`#${videoKey} .scenes-wrapper`);
-            const sceneIndex = scenesWrapper.children.length; // Approximate index
+            const sceneIndex = scenesWrapper.children.length;
+            const uniqueId = Date.now();
             
             const newScene = document.createElement('div');
             newScene.classList.add('scene-container', 'mb-3');
@@ -135,14 +148,13 @@
                 <div class="mb-2">
                     <label class="form-label fw-bold small">Footage Source:</label>
                     <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="radio" name="${videoKey}_media_type_${Math.random()}" value="url" checked onchange="toggleMediaInput(this)">
+                        <input class="form-check-input" type="radio" name="${videoKey}_media_type_select_${sceneIndex}_${uniqueId}" value="url" checked onchange="toggleMediaInput(this)">
                         <label class="form-check-label">URL</label>
                     </div>
                     <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="radio" name="${videoKey}_media_type_${Math.random()}" value="file" onchange="toggleMediaInput(this)">
+                        <input class="form-check-input" type="radio" name="${videoKey}_media_type_select_${sceneIndex}_${uniqueId}" value="file" onchange="toggleMediaInput(this)">
                         <label class="form-check-label">File</label>
                     </div>
-                    <!-- Hidden inputs to normalize name for backend list retrieval -->
                     <input type="hidden" name="${videoKey}_media_type" value="url" class="media-type-hidden">
                 </div>
                 <div class="media-input-url mb-2">
@@ -153,18 +165,72 @@
                 </div>
             `;
             
-            // Fix radio button names and hidden inputs so Flask request.form.getlist works properly
-            const radios = newScene.querySelectorAll('input[type="radio"]');
-            const hiddenType = newScene.querySelector('.media-type-hidden');
-            radios.forEach(r => {
-                r.name = `${videoKey}_media_type_select_${sceneIndex}_${Date.now()}`; // Unique UI group
-                r.addEventListener('change', (e) => {
-                     hiddenType.value = e.target.value;
-                });
-            });
-
             scenesWrapper.appendChild(newScene);
             reindexFileInputs(videoKey);
+        }
+
+        function addVideo() {
+            const videosWrapper = document.getElementById('videos-wrapper');
+            
+            // Find the highest video ID number currently in DOM to avoid conflicts
+            const allCards = document.querySelectorAll('.card.mb-3');
+            let maxNum = 0;
+            allCards.forEach(card => {
+                const parts = card.id.split('_');
+                if (parts.length > 1) {
+                    const num = parseInt(parts[1]);
+                    if (!isNaN(num) && num > maxNum) maxNum = num;
+                }
+            });
+            const nextNum = maxNum + 1;
+            const videoKey = `video_${nextNum}`;
+            const uniqueId = Date.now();
+
+            const newVideo = document.createElement('div');
+            newVideo.className = 'card mb-3';
+            newVideo.id = videoKey;
+            newVideo.innerHTML = `
+                <div class="card-header">
+                    <h5 class="mb-0 video-title">Video ${nextNum}</h5>
+                    <button type="button" class="btn btn-danger btn-sm" onclick="deleteVideo('${videoKey}')"><i class="bi bi-trash"></i> Delete Video</button>
+                </div>
+                <div class="card-body scenes-wrapper">
+                    <!-- Initial Scene -->
+                    <div class="scene-container mb-3">
+                        <div class="d-flex justify-content-end mb-2">
+                            <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteScene(this)"><i class="bi bi-x-lg"></i></button>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Script (Voiceover Text):</label>
+                            <textarea name="${videoKey}_script" class="form-control" rows="2"></textarea>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label fw-bold small">Footage Source:</label>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="${videoKey}_media_type_select_0_${uniqueId}" value="url" checked onchange="toggleMediaInput(this)">
+                                <label class="form-check-label">Image/Video URL</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="${videoKey}_media_type_select_0_${uniqueId}" value="file" onchange="toggleMediaInput(this)">
+                                <label class="form-check-label">Upload File</label>
+                            </div>
+                            <input type="hidden" name="${videoKey}_media_type" value="url" class="media-type-hidden">
+                        </div>
+                        <div class="media-input-url mb-2">
+                            <input type="text" name="${videoKey}_media_url" class="form-control" placeholder="https://example.com/video.mp4">
+                        </div>
+                        <div class="media-input-file mb-2 d-none">
+                            <input type="file" name="${videoKey}_file_0" class="form-control" accept="image/*,video/*">
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <button type="button" class="btn btn-primary btn-sm" onclick="addScene('${videoKey}')"><i class="bi bi-plus-circle"></i> Add Scene</button>
+                </div>
+            `;
+            
+            videosWrapper.appendChild(newVideo);
+            // No reload called here!
         }
 
         function deleteScene(button) {
@@ -178,15 +244,6 @@
             } else {
                 alert("Each video must have at least one scene.");
             }
-        }
-
-        function addVideo() {
-            const videosWrapper = document.getElementById('videos-wrapper');
-            const videoKey = `video_${videoCounter}`;
-            // ... (Logic same as before, but simplified scene structure inside) ...
-            // For brevity, I'm skipping the full HTML string here, but it mimics the addScene structure
-            // Just remember to increment videoCounter
-            location.reload(); // Simplest way to add a video row cleanly without massive JS duplication for this example
         }
 
         function deleteVideo(videoKey) {

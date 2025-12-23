@@ -1,2 +1,15 @@
 Flask
+moviepy==1.0.3
+requests
+openai
+pyttsx3
+whisper-timestamped
 python-dotenv
+numpy<2.0.0
+google-generativeai
+fish-audio-sdk
+pedalboard
+noisereduce
+soundfile
+Pillow
+azure-storage-blob
