@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from config import Config
 import base64
 from fish_audio_sdk import Session, TTSRequest
+from azure.storage.blob import BlobServiceClient, ContentSettings
 
 from moviepy.config import change_settings
 if os.path.exists("/usr/bin/magick"):
@@ -36,10 +37,41 @@ MANUAL_PROJECT_PATH = os.path.join(PROJECTS_FOLDER, MANUAL_PROJECT_NAME)
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
+AZURE_CONNECTION_STRING = Config.AZURE_CONNECTION_STRING
+AZURE_CONTAINER_NAME = Config.AZURE_CONTAINER_NAME
+
+if AZURE_CONNECTION_STRING:
+    blob_service_client = BlobServiceClient.from_connection_string(AZURE_CONNECTION_STRING)
+else:
+    print("WARNING: AZURE_CONNECTION_STRING not found in .env. Cloud uploads will fail.")
+    blob_service_client = None
+
 # --- Helper Functions ---
 
+def upload_to_azure(local_file_path, blob_name):
+    """Uploads a local file to Azure Blob Storage and returns the public URL."""
+    if not blob_service_client:
+        return None
+    
+    try:
+        blob_client = blob_service_client.get_blob_client(container=AZURE_CONTAINER_NAME, blob=blob_name)
+        
+        # Determine content type
+        content_type = 'video/mp4' if blob_name.endswith('.mp4') else 'application/octet-stream'
+        
+        with open(local_file_path, "rb") as data:
+            blob_client.upload_blob(
+                data, 
+                overwrite=True,
+                content_settings=ContentSettings(content_type=content_type)
+            )
+        return blob_client.url
+    except Exception as e:
+        print(f"Azure Upload Error: {e}")
+        return None
+
+
 def download_file(url, folder):
-    """Downloads a file from a URL to the specified folder."""
     try:
         response = requests.get(url, stream=True)
         response.raise_for_status()
@@ -53,6 +85,20 @@ def download_file(url, folder):
     except Exception as e:
         print(f"Download error: {e}")
         return None
+
+def get_next_project_name(base_name="manual_project"):
+    if not os.path.exists(os.path.join(PROJECTS_FOLDER, base_name)):
+        return base_name
+    counter = 1
+    while True:
+        new_name = f"{base_name}_{counter}"
+        if not os.path.exists(os.path.join(PROJECTS_FOLDER, new_name)):
+            return new_name
+        counter += 1
+
+def clean_text_for_folder(text):
+    import re
+    return re.sub(r'[^\w\s]', '', text).strip()
 
 def generate_voice_pyttsx3(text, output_path):
     """Generates offline voiceover."""
@@ -100,13 +146,11 @@ def generate_google_tts(text, output_path):
         print(f"Google TTS Request Failed: {e}")
         return False
     
-def generate_fish_audio(text, output_path):
+def generate_fish_audio(text, output_path, ref_id="b85455e9d73e492d95c554176a8913df"):
     """Generates audio using Fish Audio SDK with the Kiova British voice."""
     try:
         # Your specific API Key
         session = Session(Config.FISH_AUDIO_API_KEY) 
-        # Your specific Voice ID
-        ref_id = "b85455e9d73e492d95c554176a8913df" 
         
         # Stream the audio directly to the file
         with open(output_path, "wb") as f:
@@ -142,10 +186,17 @@ def clean_text_for_folder(text):
 
 # --- Routes ---
 
+@app.route('/reset')
+def reset_project():
+    """Clears session and redirects to home to start fresh."""
+    session.clear()
+    return redirect(url_for('step1'))
+
 @app.route('/', methods=['GET', 'POST'])
 def step1():
     if request.method == 'GET':
         session.pop('scripts', None)
+        session.pop('generated_videos', None) # Clear previous results
     if request.method == 'POST':
         session['scripts'] = {"video_1": [{"script": "", "media_type": "url", "media_source": ""}]}
         return redirect(url_for('step2'))
@@ -174,7 +225,6 @@ def step2():
                     if media_type == 'url':
                         final_source = media_urls[index]
                     elif media_type == 'file':
-                        # Check file upload
                         file_input_name = f"{key}_file_{index}"
                         if file_input_name in request.files:
                             file = request.files[file_input_name]
@@ -184,12 +234,12 @@ def step2():
                                 file.save(file_path)
                                 final_source = file_path
                             else:
-                                # Preserve existing file if re-editing (simplified logic)
-                                # For a robust app, check previous session data here
+                                # Logic to keep existing file if not re-uploaded would go here
+                                # For now, relies on re-upload if logic flow was broken
                                 pass
-
+                    
                     video_scenes.append({
-                        "scene": str(index + 1), # Use 1-based index for scene ID
+                        "scene": str(index + 1),
                         "script": script_text.strip(),
                         "media_type": media_type,
                         "media_source": final_source
@@ -204,6 +254,7 @@ def step2():
             return redirect(url_for('step2'))
 
         session['scripts'] = scripts_data
+        session.pop('generated_videos', None) 
         return redirect(url_for('step3'))
 
     return render_template('step2.html', scripts=session.get('scripts', {}))
@@ -212,15 +263,22 @@ def step2():
 def step3():
     if 'scripts' not in session: return redirect(url_for('step2'))
 
+    if request.method == 'GET' and 'generated_videos' in session:
+        return render_template('step3.html', 
+                             scripts=session.get('scripts', {}), 
+                             generated_videos=session['generated_videos'])
+
     if request.method == 'POST':
         voice_option = request.form.get('voiceover')
-        bg_music_file = request.files.get('bg_music')
 
-        # 1. Auto-Increment Project Name (THIS IS CORRECT)
+        custom_ref_id = request.form.get('fish_ref_id')
+        if not custom_ref_id or not custom_ref_id.strip():
+            custom_ref_id = "b85455e9d73e492d95c554176a8913df"
+        
+        # 1. Project Setup
         current_project_name = get_next_project_name()
         current_project_path = os.path.join(PROJECTS_FOLDER, current_project_name)
         
-        # Create directories for THIS specific run
         gen_video_dir = os.path.join(current_project_path, 'generated_video')
         gen_images_dir = os.path.join(current_project_path, 'generated_images')
         os.makedirs(gen_video_dir, exist_ok=True)
@@ -228,43 +286,43 @@ def step3():
 
         print(f"Generating into folder: {current_project_name}")
 
-        # Prepare Utils
+        # Utils
         pollinations_utils = PollinationsUtils(Config.POLLINATIONS_API_KEY if hasattr(Config, 'POLLINATIONS_API_KEY') else None)
+        vg = VideoGenerator(current_project_name)
+        bg_gen = BackgroundAudioGenerator(current_project_name, bg_music_db=-25)
 
-        # --- DELETED THE ZOMBIE CODE HERE ---
-        # (The lines that reset path to MANUAL_PROJECT_PATH were removed)
-        # ------------------------------------
-
-        # Handle Background Music Upload
-        # Save to ROOT data folder so it is accessible across projects
-        bg_music_path = None
-        bg_music_folder = os.path.join(BASE_DIR, 'data', 'bg_music')
-        
-        if bg_music_file and bg_music_file.filename != '':
-            os.makedirs(bg_music_folder, exist_ok=True)
-            safe_audio_name = secure_filename(bg_music_file.filename)
-            bg_music_path = os.path.join(bg_music_folder, safe_audio_name)
-            bg_music_file.save(bg_music_path)
-
-        generated_files = []
+        azure_links = [] 
 
         # 2. Iterate Videos
         for vid_key, scenes in session['scripts'].items():
             vid_id = vid_key.split('_')[1] 
             
-            # Prepare Data Structures
+            # --- A. Handle Specific Music Upload ---
+            # Look for input name="bg_music_video_1", "bg_music_video_2" etc.
+            music_file_input_name = f"bg_music_{vid_key}"
+            music_file = request.files.get(music_file_input_name)
+            
+            specific_music_path = None
+            if music_file and music_file.filename != '':
+                # Save to project folder/data/bg_music/video_1_song.mp3
+                music_folder = os.path.join(current_project_path, 'data', 'bg_music')
+                os.makedirs(music_folder, exist_ok=True)
+                
+                safe_name = secure_filename(f"{vid_key}_{music_file.filename}")
+                specific_music_path = os.path.join(music_folder, safe_name)
+                music_file.save(specific_music_path)
+
+            # --- B. Prepare Video Generation Data ---
             video_dict = {'video': vid_id, 'scenes': []}
             media_paths_list = []
 
             for scene in scenes:
                 scene_id = scene['scene']
                 clean_scene_id = clean_text_for_folder(scene_id)
-                
-                # Create specific folder for this scene using the NEW path
                 scene_folder = os.path.join(gen_images_dir, str(vid_id), clean_scene_id)
                 os.makedirs(scene_folder, exist_ok=True)
 
-                # A. Handle Voiceover
+                # Voiceover Logic
                 vo_path = os.path.join(scene_folder, "voiceover.mp3")
                 
                 if voice_option == 'Pollinations':
@@ -276,28 +334,24 @@ def step3():
                         os.rename(latest_file, vo_path)
                 elif voice_option == 'GoogleTTS':
                     if not generate_google_tts(scene['script'], vo_path):
-                         # Fallback to gTTS if Google fails
                          from gtts import gTTS
                          tts = gTTS(text=scene['script'], lang='en', slow=False)
                          tts.save(vo_path)
                 elif voice_option == 'FishAudio':
-                    if not generate_fish_audio(scene['script'], vo_path):
-                         # Fallback to gTTS if Fish fails (e.g. out of credits)
+                    if not generate_fish_audio(scene['script'], vo_path, ref_id=custom_ref_id):
                          from gtts import gTTS
                          tts = gTTS(text=scene['script'], lang='en', slow=False)
                          tts.save(vo_path)
                 else:
-                    # Fallback (Offline/Pyttsx3 or gTTS)
                     from gtts import gTTS
                     tts = gTTS(text=scene['script'], lang='en', slow=False)
                     tts.save(vo_path)
 
-                # B. Handle Visuals
+                # Media Logic
                 final_media_path = ""
                 if scene['media_type'] == 'url':
                     final_media_path = download_file(scene['media_source'], scene_folder)
                 else:
-                    # It's a file path in static/uploads. Copy it to project folder
                     source_path = scene['media_source']
                     if os.path.exists(source_path):
                         ext = os.path.splitext(source_path)[1]
@@ -305,57 +359,43 @@ def step3():
                         shutil.copy(source_path, dest_path)
                         final_media_path = dest_path
 
-                # C. Build Dicts
-                video_dict['scenes'].append({
-                    'scene': scene_id,
-                    'text': scene['script'],
-                    'visuals': 'manual_input' 
-                })
+                video_dict['scenes'].append({'scene': scene_id, 'text': scene['script'], 'visuals': 'manual'})
+                media_paths_list.append({'scene': scene_id, 'image_path': final_media_path, 'google_image_path': ''})
 
-                media_paths_list.append({
-                    'scene': scene_id,
-                    'image_path': final_media_path,
-                    'google_image_path': '' 
-                })
-
-            # 3. Generate Video
+            # --- C. Generate Video & Apply Music ---
             try:
-                # Pass the NEW project name so VG looks in the right place
-                vg = VideoGenerator(current_project_name)
-                final_video_path = vg.execute(video_dict, media_paths_list)
+                # 1. Generate base video
+                raw_video_path = vg.execute(video_dict, media_paths_list)
                 
-                if final_video_path and os.path.exists(final_video_path):
-                    generated_files.append(final_video_path)
+                final_output_path = raw_video_path
+
+                # 2. Apply Specific Music (if uploaded)
+                if specific_music_path and os.path.exists(raw_video_path):
+                    print(f"Applying music to {vid_key}...")
+                    # The updated generator will use specific_audio_path if provided
+                    music_video_path = bg_gen.execute(raw_video_path, specific_audio_path=specific_music_path)
+                    if music_video_path:
+                        final_output_path = music_video_path
+
+                # 3. Upload to Azure
+                if final_output_path and os.path.exists(final_output_path):
+                    filename = os.path.basename(final_output_path)
+                    blob_name = f"{current_project_name}/{vid_key}_{filename}"
+                    print(f"Uploading {blob_name}...")
+                    
+                    cloud_url = upload_to_azure(final_output_path, blob_name)
+                    azure_links.append(cloud_url if cloud_url else f"Upload Failed: {final_output_path}")
+
             except Exception as e:
-                print(f"Video Gen Error: {e}")
-                flash(f"Error generating video {vid_id}: {str(e)}", "danger")
+                print(f"Gen Error {vid_key}: {e}")
                 continue
 
-        # 4. Add Background Audio
-        if bg_music_path and generated_files:
-            try:
-                bg_gen = BackgroundAudioGenerator(current_project_name, bg_music_db=-25)
-                # Force the generator to look in the root data folder
-                bg_gen.bg_music_directory = bg_music_folder
-                
-                final_output_paths = []
-                for vid_path in generated_files:
-                    res = bg_gen.execute(vid_path)
-                    if res: final_output_paths.append(res)
-                
-                if final_output_paths:
-                    flash(f"Generated {len(final_output_paths)} videos with music!", "success")
-                else:
-                    flash("Generated videos (Music add failed).", "warning")
+        session['generated_videos'] = azure_links
+        flash(f"Generation Complete! Created {len(azure_links)} videos.", "success")
 
-            except Exception as e:
-                 print(f"BG Audio Error: {e}")
-                 flash("Video generated, but background audio failed.", "warning")
-        else:
-             if generated_files:
-                 flash(f"Successfully generated {len(generated_files)} videos!", "success")
-
-        return render_template('step3.html', scripts=session.get('scripts', {}))
+        return render_template('step3.html', 
+                             scripts=session.get('scripts', {}), 
+                             generated_videos=azure_links)
 
     return render_template('step3.html', scripts=session.get('scripts', {}))
 

@@ -10,13 +10,29 @@
         body { background-color: #f8f9fa; }
         .container { max-width: 800px; }
         .scene-review { border-bottom: 1px solid #eee; padding-bottom: 0.5rem; margin-bottom: 1rem; }
+        .video-card { border-left: 5px solid #0d6efd; background: white; padding: 20px; margin-bottom: 20px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        
+        /* Loading Overlay */
+        #loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.95); z-index: 9999;
+            display: flex; flexDirection: column; justify-content: center; align-items: center;
+        }
     </style>
 </head>
 <body>
+
+    <!-- LOADING OVERLAY -->
+    <div id="loading-overlay" class="d-none">
+        <div class="spinner-border text-primary" style="width: 4rem; height: 4rem;" role="status"></div>
+        <h2 class="mt-3">Generating Your Reels...</h2>
+        <p class="lead">Processing video, voice, and specific music tracks.</p>
+    </div>
+
     <div class="container my-5">
         <div class="text-center mb-4">
             <h1>Step 3: Finalize</h1>
-            <p class="lead">Select audio options and generate your reels.</p>
+            <p class="lead">Review scenes, choose voice, and assign music.</p>
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -26,59 +42,125 @@
                 {% endfor %}
             {% endif %}
         {% endwith %}
-        
-        <div class="card my-4">
-            <div class="card-header">
-                <h3><i class="bi bi-card-text"></i> Review Scenes</h3>
+
+        <!-- RESULTS SECTION -->
+        {% if generated_videos %}
+        <div class="card mb-5 border-success">
+            <div class="card-header bg-success text-white">
+                <h4 class="mb-0"><i class="bi bi-check-circle-fill"></i> Generation Successful!</h4>
             </div>
             <div class="card-body">
-                {% for video_key, scenes in scripts.items() %}
-                    <h5 class="mb-3">{{ video_key.replace('_', ' ').title() }}</h5>
-                    {% for scene in scenes %}
-                    <div class="scene-review">
-                        <p class="mb-1"><strong>Script:</strong> {{ scene.script }}</p>
-                        <p class="mb-0 text-muted">
-                            <small><strong>Media:</strong> 
-                            {% if scene.media_type == 'file' %}
-                                {{ scene.media_source.split('/')[-1] }}
-                            {% else %}
-                                <a href="{{ scene.media_source }}" target="_blank">Link</a>
-                            {% endif %}
-                            </small>
-                        </p>
+                <div class="list-group">
+                    {% for link in generated_videos %}
+                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>Video {{ loop.index }}:</strong>
+                            <a href="{{ link }}" target="_blank" class="text-decoration-none ms-2">View Video</a>
+                        </div>
+                        <a href="{{ link }}" class="btn btn-sm btn-outline-primary" download><i class="bi bi-download"></i></a>
                     </div>
                     {% endfor %}
-                    <hr>
-                {% endfor %}
+                </div>
+                <hr>
+                <div class="d-flex justify-content-center gap-3">
+                    <a href="{{ url_for('reset_project') }}" class="btn btn-outline-danger">Start Fresh</a>
+                    <a href="{{ url_for('step2') }}" class="btn btn-outline-secondary">Edit Scenes</a>
+                </div>
             </div>
         </div>
+        {% endif %}
+        
+        <!-- FORM SECTION -->
+        {% if not generated_videos %}
+        <form method="post" enctype="multipart/form-data" onsubmit="showLoading()">
+            
+            <div class="card p-4 mb-4">
+                <h4 class="mb-3"><i class="bi bi-mic"></i> Global Voiceover Settings</h4>
+                
+                <div class="mb-3">
+                    <label for="voiceover" class="form-label">Select Voice Engine</label>
+                    <select class="form-select" id="voiceover" name="voiceover" onchange="toggleFishInput()">
+                        <option value="GoogleTTS">Google TTS (Journey/Energetic)</option>
+                        <option value="FishAudio">Fish Audio (High Quality Clone)</option>
+                        <option value="pyttsx3">Offline Fallback</option>
+                        <option value="Pollinations">Pollinations AI</option>
+                    </select>
+                </div>
 
-        <div class="card p-4">
-            <form method="post" enctype="multipart/form-data">
-                <div class="row">
-                    <div class="col-md-6 mb-3">
-                        <label for="voiceover" class="form-label"><h5><i class="bi bi-mic"></i> Voiceover</h5></label>
-                        <select class="form-select" id="voiceover" name="voiceover">
-                            <option value="pyttsx3">Offline (pyttsx3)</option>
-                            <option value="FishAudio">Fish Audio (British Kiova - High Quality)</option>
-                            <option value="GoogleTTS" selected>Google TTS (Female - Free Tier)</option>
-                            <option value="Pollinations">AI Cloud (Pollinations)</option>
-                        </select>
-                    </div>
-                    <div class="col-md-6 mb-3">
-                        <label for="bg_music" class="form-label"><h5><i class="bi bi-music-note-beamed"></i> Background Music (Optional)</h5></label>
-                        <input type="file" class="form-control" id="bg_music" name="bg_music" accept="audio/*">
-                        <div class="form-text">If left empty, no music will be added.</div>
+                <!-- Hidden Input for Fish Audio Ref ID -->
+                <div id="fish-settings" class="d-none border-start border-4 border-info ps-3 bg-light p-2 rounded">
+                    <label for="fish_ref_id" class="form-label fw-bold small text-info">Fish Audio Reference ID (Voice ID)</label>
+                    <input type="text" class="form-control font-monospace" id="fish_ref_id" name="fish_ref_id" 
+                           value="b85455e9d73e492d95c554176a8913df" placeholder="Enter Ref ID...">
+                    <div class="form-text small">Default: British Kiova Voice. Change this to clone a different voice.</div>
+                </div>
+            </div>
+
+            <h4 class="mb-3"><i class="bi bi-collection-play"></i> Video Configuration</h4>
+            
+            {% for video_key, scenes in scripts.items() %}
+            <div class="video-card">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="mb-0 text-primary">{{ video_key.replace('_', ' ').title() }}</h5>
+                    <span class="badge bg-secondary">{{ scenes|length }} Scenes</span>
+                </div>
+
+                <!-- Music Input SPECIFIC for this video -->
+                <div class="mb-3">
+                    <label class="form-label fw-bold"><i class="bi bi-music-note-beamed"></i> Background Music for {{ video_key.replace('_', ' ').title() }}</label>
+                    <input type="file" class="form-control" name="bg_music_{{ video_key }}" accept="audio/*">
+                    <div class="form-text small">Leave empty for no music.</div>
+                </div>
+
+                <div class="accordion" id="accordion_{{ video_key }}">
+                    <div class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse_{{ video_key }}">
+                                View Script & Visuals
+                            </button>
+                        </h2>
+                        <div id="collapse_{{ video_key }}" class="accordion-collapse collapse" data-bs-parent="#accordion_{{ video_key }}">
+                            <div class="accordion-body bg-light">
+                                {% for scene in scenes %}
+                                <div class="scene-review">
+                                    <p class="mb-1"><strong>Script:</strong> {{ scene.script }}</p>
+                                    <p class="mb-0 text-muted"><small><strong>Media:</strong> {{ scene.media_source.split('/')[-1] if scene.media_type == 'file' else 'URL Link' }}</small></p>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <hr class="my-4">
-                <div class="d-flex justify-content-between align-items-center">
-                    <a href="{{ url_for('step2') }}" class="btn btn-outline-secondary btn-lg"><i class="bi bi-arrow-left-circle"></i> Back</a>
-                    <button type="submit" class="btn btn-success btn-lg"><i class="bi bi-magic"></i> Generate Videos</button>
-                </div>
-            </form>
-        </div>
+            </div>
+            {% endfor %}
+
+            <div class="d-flex justify-content-between align-items-center mt-4">
+                <a href="{{ url_for('step2') }}" class="btn btn-outline-secondary btn-lg">Back</a>
+                <button type="submit" class="btn btn-success btn-lg">Generate All Videos</button>
+            </div>
+        </form>
+        {% endif %}
     </div>
+
+    <script>
+
+        function toggleFishInput() {
+            const select = document.getElementById('voiceover');
+            const fishSettings = document.getElementById('fish-settings');
+            if (select.value === 'FishAudio') {
+                fishSettings.classList.remove('d-none');
+            } else {
+                fishSettings.classList.add('d-none');
+            }
+        }
+        
+        // Run on load in case the browser remembers the selection
+        document.addEventListener('DOMContentLoaded', toggleFishInput);
+
+        function showLoading() {
+            document.getElementById('loading-overlay').classList.remove('d-none');
+        }
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

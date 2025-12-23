@@ -87,7 +87,7 @@ class BackgroundAudioGenerator(BaseGenerator):
             print(f"Error accessing background music directory {self.bg_music_directory}: {e}")
             return None
 
-    def execute(self, input_video_path, output_suffix="_with_bg_music"):
+    def execute(self, input_video_path, output_suffix="_with_bg_music", specific_audio_path=None):
         """
         Adds background music to an existing video file.
 
@@ -101,6 +101,31 @@ class BackgroundAudioGenerator(BaseGenerator):
         Returns:
             str: Path to the newly created video file with background music, or None on failure.
         """
+
+        if not os.path.isfile(input_video_path):
+            print(f"Error: Input video file not found: {input_video_path}")
+            return None
+
+        # --- 1. Determine Output File Path ---
+        video_dir = os.path.dirname(input_video_path)
+        base_name, extension = os.path.splitext(os.path.basename(input_video_path))
+        output_file_name = f"{base_name}{output_suffix}{extension}"
+        output_file_path = os.path.join(video_dir, output_file_name)
+        
+        # --- 2. Get Background Audio File (MODIFIED LOGIC) ---
+        if specific_audio_path:
+            # Case A: User provided a specific file
+            bg_audio_file_path = specific_audio_path
+            print(f"Using specific background audio: {bg_audio_file_path}")
+        else:
+            # Case B: Pick random (or return None if you prefer no default)
+            bg_audio_file_path = self._get_random_audio_file()
+
+        if not bg_audio_file_path or not os.path.exists(bg_audio_file_path):
+            print("BackgroundAudioGenerator: No valid audio file found. Returning original video.")
+            return input_video_path # Return original if no music found
+
+
         print(f"BackgroundAudioGenerator: Starting process for video: {input_video_path}")
 
         if not os.path.isfile(input_video_path):
