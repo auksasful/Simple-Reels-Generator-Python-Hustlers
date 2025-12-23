@@ -10,6 +10,7 @@ from config import Config
 import base64
 from fish_audio_sdk import Session, TTSRequest
 from azure.storage.blob import BlobServiceClient, ContentSettings
+import time
 
 from moviepy.config import change_settings
 if os.path.exists("/usr/bin/magick"):
@@ -95,6 +96,32 @@ def get_next_project_name(base_name="manual_project"):
         if not os.path.exists(os.path.join(PROJECTS_FOLDER, new_name)):
             return new_name
         counter += 1
+
+def cleanup_directory(folder_path, max_age_hours=0):
+    """
+    Deletes files in folder_path.
+    - If max_age_hours == 0: Deletes ALL files (Start Fresh).
+    - If max_age_hours > 0: Deletes only files older than that age (Maintenance).
+    """
+    if not os.path.exists(folder_path):
+        return
+    
+    current_time = time.time()
+    age_seconds = max_age_hours * 3600
+    
+    print(f"Running cleanup on {folder_path} (Max age: {max_age_hours} hours)...")
+    
+    for filename in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, filename)
+        try:
+            if os.path.isfile(file_path):
+                file_mod_time = os.path.getmtime(file_path)
+                # Check if file is older than the limit (or if limit is 0)
+                if max_age_hours == 0 or (current_time - file_mod_time) > age_seconds:
+                    os.remove(file_path)
+                    print(f"Deleted: {filename}")
+        except Exception as e:
+            print(f"Error deleting {filename}: {e}")
 
 def clean_text_for_folder(text):
     import re
@@ -188,18 +215,38 @@ def clean_text_for_folder(text):
 
 @app.route('/reset')
 def reset_project():
-    """Clears session and redirects to home to start fresh."""
+    """Clears session and wipes temporary user uploads to start fresh."""
+    
+    # 1. Delete ALL files in static/uploads
+    cleanup_directory(app.config['UPLOAD_FOLDER'], max_age_hours=0)
+    
+    # 2. Delete ALL files in data/bg_music
+    bg_music_folder = os.path.join(BASE_DIR, 'data', 'bg_music')
+    cleanup_directory(bg_music_folder, max_age_hours=0)
+    
+    # 3. Clear Session
     session.clear()
+    
+    flash("Project reset. Temporary files deleted.", "info")
     return redirect(url_for('step1'))
 
 @app.route('/', methods=['GET', 'POST'])
 def step1():
+    # --- Maintenance: Clean up abandoned files older than 24 hours ---
+    # This prevents the server from filling up if users just close the tab.
+    cleanup_directory(app.config['UPLOAD_FOLDER'], max_age_hours=24)
+    bg_music_folder = os.path.join(BASE_DIR, 'data', 'bg_music')
+    cleanup_directory(bg_music_folder, max_age_hours=24)
+    # ---------------------------------------------------------------
+
     if request.method == 'GET':
         session.pop('scripts', None)
-        session.pop('generated_videos', None) # Clear previous results
+        session.pop('generated_videos', None)
+    
     if request.method == 'POST':
         session['scripts'] = {"video_1": [{"script": "", "media_type": "url", "media_source": ""}]}
         return redirect(url_for('step2'))
+    
     return render_template('step1.html')
 
 @app.route('/step2', methods=['GET', 'POST'])
